@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14998b2d8b974f74484ca83da16fc4da, type: 3}
+  m_Name: ActivityReachOutInfo
+  m_EditorClassIdentifier: 
+  activityTypeName: ActivityReachOut
+  animatorParamName: 
+  animatorParamType: 0
+  reviseInfo: {fileID: 11400000, guid: 062d4fbba744bb645844adc518c96d07, type: 2}
+  IKGameObjectName: ReachOutIK
+  effectGoal: 3
+  reachOutUseTime: 2
+  countermandUseTime: 0.5
