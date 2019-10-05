@@ -8,7 +8,10 @@ public class GameControler : MonoBehaviour
     public static GameControler ins { get; private set; }
     public event SwitchFactionDelegate SwitchFactionStartEvent;
     public event SwitchFactionDelegate SwitchFactionCompleteEvent;
-    public event System.Action<GameObject, int> PlayerPointChangedEvent;
+
+    public GameObject playerPrefab;
+    public GameObject[] playerGOs;
+    public Transform spawnPoints;
 
     public float switchFactionUseTime = 5;
     public ReviseInfo[] changeToGhostRevises;
@@ -16,7 +19,7 @@ public class GameControler : MonoBehaviour
 
     // Ghost抓到People获得的分数
     public int rewardPoint = 10;
-    private Dictionary<GameObject, int> playerPointPairs = new Dictionary<GameObject, int>();
+    public int score { get; private set; }
 
     #region 阵营切换测试
     public GameObject originalGhostGO;
@@ -31,11 +34,6 @@ public class GameControler : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        GameObject[] players = GameObject.FindGameObjectsWithTag("Player");
-        foreach(GameObject tempPlay in players)
-        {
-            playerPointPairs.Add(tempPlay, 0);
-        }
     }
 
     private void Update()
@@ -48,43 +46,72 @@ public class GameControler : MonoBehaviour
         //    originalGhostGO = originalPeopleGO;
         //    originalPeopleGO = tempGO;
         //}
+        if (Input.GetKeyDown(KeyCode.P))
+        {
+            GameObject[] players = GameObject.FindGameObjectsWithTag("Player");
+            int randomIndex = Random.Range(0, players.Length - 1);
+
+            ChangeToGhost(players[randomIndex].GetComponent<AttributesManager>());
+        }
         #endregion 阵营切换测试
     }
 
-    //public void SwitchFaction(GameObject originalGhostAttrManager, GameObject originalPeopleAttrManager)
-    public void SwitchFaction(AttributesManager originalGhostAttrManager, AttributesManager originalPeopleAttrManager)
+    private void ChangeToPeople(AttributesManager originalGhostAttrManager)
     {
-        SwitchFactionStartEvent?.Invoke();
-        StartCoroutine(IEnumeratorHelper.After(() => { SwitchFactionCompleteEvent?.Invoke(); }, switchFactionUseTime));
-        //AttributesManager originalGhostAttrManager = originalGhostAttrManager.GetComponent<AttributesManager>();
         originalGhostAttrManager.faction = PlayerFaction.People;
         originalGhostAttrManager.RemoveAllItemRevise();
         foreach (ReviseInfo tempReviseInfo in changeToPeopleRevises)
         {
             long reviseReceipt = originalGhostAttrManager.AddItemRevise(tempReviseInfo);
         }
+    }
 
-        //AttributesManager originalPeopleAttrManager = originalPeopleAttrManager.GetComponent<AttributesManager>();
+    private void ChangeToGhost(AttributesManager originalPeopleAttrManager)
+    {
         originalPeopleAttrManager.faction = PlayerFaction.Ghost;
         originalPeopleAttrManager.RemoveAllItemRevise();
-        foreach(ReviseInfo tempReviseInfo in changeToGhostRevises)
+        foreach (ReviseInfo tempReviseInfo in changeToGhostRevises)
         {
             long reviseReceipt = originalPeopleAttrManager.AddItemRevise(tempReviseInfo);
         }
         ActivityManager originalPeopleActivityManager = originalPeopleAttrManager.GetComponent<ActivityManager>();
         originalPeopleActivityManager.enabled = false;
         StartCoroutine(IEnumeratorHelper.After(() => { originalPeopleActivityManager.enabled = true; }, switchFactionUseTime));
-        //AddPoint(originalGhostAttrManager, rewardPoint);
-        AddPoint(originalGhostAttrManager.gameObject, rewardPoint);
     }
 
-    public void AddPoint(GameObject player, int point)
+    public void SwitchFaction(AttributesManager originalGhostAttrManager, AttributesManager originalPeopleAttrManager)
     {
-        int currentPoint;
-        if(playerPointPairs.TryGetValue(player, out currentPoint))
+        SwitchFactionStartEvent?.Invoke();
+        StartCoroutine(IEnumeratorHelper.After(() => { SwitchFactionCompleteEvent?.Invoke(); }, switchFactionUseTime));
+        ChangeToPeople(originalGhostAttrManager);
+
+        ChangeToGhost(originalPeopleAttrManager);
+        AddScore(originalGhostAttrManager.gameObject);
+    }
+
+    public void AddScore(GameObject addScorePlayerGO)
+    {
+        addScorePlayerGO.GetComponent<PlayerState>().score += rewardPoint;
+    }
+
+    public GameObject SpawnPlayer(int netCode, string name)
+    {
+        int randomSpawnIndex = Random.Range(0, spawnPoints.childCount - 1);
+        float randomYew = Random.Range(0f, 360f);
+        GameObject resultGO = null;
+        foreach (GameObject tempGO in playerGOs)
         {
-            currentPoint += point;
-            PlayerPointChangedEvent?.Invoke(player, currentPoint);
+            if (!tempGO.activeInHierarchy)
+            {
+                resultGO = tempGO;
+                break;
+            }
         }
+        resultGO.transform.position = spawnPoints.GetChild(randomSpawnIndex).position;
+        resultGO.transform.rotation = Quaternion.Euler(0, randomYew, 0);
+        resultGO.SetActive(true);
+        resultGO.name = name;
+        resultGO.GetComponent<PlayerState>().netCode = netCode;
+        return resultGO;
     }
 }

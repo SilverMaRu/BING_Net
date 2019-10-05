@@ -35,7 +35,19 @@ public class Filling : MonoBehaviour
                 break;
         }
         rectTrans.pivot = pivot;
+        
+        Client.ins.SpawnedLocalPlayerEvent += OnSpawnedLocalPlayer;
+    }
 
+    private void OnNetCodeChanged()
+    {
+        attrManager = Client.ins.GetLocalPlayerGO().GetComponent<AttributesManager>();
+        attrManager.CurrentSPChangeEvent += OnCurrentSPChange;
+    }
+
+    private void OnSpawnedLocalPlayer()
+    {
+        attrManager = Client.ins.GetLocalPlayerGO().GetComponent<AttributesManager>();
         attrManager.CurrentSPChangeEvent += OnCurrentSPChange;
     }
 

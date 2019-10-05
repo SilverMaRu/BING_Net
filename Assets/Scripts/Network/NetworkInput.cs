@@ -2,9 +2,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class NetworkInput:MonoBehaviour
+public class NetworkInput : MonoBehaviour
 {
-    private int playerNo;
+    public int netCode = -1;
+    public Vector3 inputDirection { get; private set; }
     private Dictionary<string, float> axisNameScalePairs = new Dictionary<string, float>();
     private const int KEY_STATE_KEYUP = 0;
     private const int KEY_STATE_KEYDOWN = 1;
@@ -16,16 +17,23 @@ public class NetworkInput:MonoBehaviour
 
     private void Start()
     {
-        Client.ins.PlayerNoChangedEvent += OnPlayerNoChangedEvent;
-        Client.ins.NetInputAxisEvent += OnNetInputAxisEvent;
-        Client.ins.NetKeyUpEvent += OnNetKeyUpEvent;
-        Client.ins.NetKeyDownEvent += OnNetKeyDownEvent;
-        Client.ins.NetKeyEvent += OnNetKeyEvent;
+        //Client.ins.NetCodeChangedEvent += OnPlayerNoChangedEvent;
+        netCode = GetComponent<PlayerState>().netCode;
+        Client.ins.NetInputAxisEvent += OnNetInputAxis;
+        Client.ins.NetInputDirectionEvent += OnNetInputDirection;
+        Client.ins.NetKeyUpEvent += OnNetKeyUp;
+        Client.ins.NetKeyDownEvent += OnNetKeyDown;
+        Client.ins.NetKeyEvent += OnNetKey;
+    }
+
+    private void OnNetInputDirection(int netCode, Vector3 inputDirection)
+    {
+        if (netCode == this.netCode) this.inputDirection = inputDirection;
     }
 
     private void OnPlayerNoChangedEvent()
     {
-        playerNo = Client.ins.playerNo;
+        netCode = Client.ins.netCode;
     }
 
     public float GetAxis(string axisName)
@@ -47,9 +55,9 @@ public class NetworkInput:MonoBehaviour
         }
     }
 
-    private void OnNetInputAxisEvent(int playerNo, string axisName, float axisScale)
+    private void OnNetInputAxis(int netCode, string axisName, float axisScale)
     {
-        if (playerNo == this.playerNo)
+        if (netCode == this.netCode)
         {
             SetAxis(axisName, axisScale);
         }
@@ -91,18 +99,18 @@ public class NetworkInput:MonoBehaviour
         }
     }
 
-    private void OnNetKeyUpEvent(int playerNo, KeyCode key)
+    private void OnNetKeyUp(int netCode, KeyCode key)
     {
-        if(playerNo == this.playerNo) SetKeyState(key, KEY_STATE_KEYUP);
+        if (netCode == this.netCode) SetKeyState(key, KEY_STATE_KEYUP);
     }
 
-    private void OnNetKeyDownEvent(int playerNo, KeyCode key)
+    private void OnNetKeyDown(int netCode, KeyCode key)
     {
-        if(playerNo == this.playerNo && !GetKey(key)) SetKeyState(key, KEY_STATE_KEYDOWN);
+        if (netCode == this.netCode && !GetKey(key)) SetKeyState(key, KEY_STATE_KEYDOWN);
     }
 
-    private void OnNetKeyEvent(int playerNo, KeyCode key)
+    private void OnNetKey(int netCode, KeyCode key)
     {
-        if (playerNo == this.playerNo) SetKeyState(key, KEY_STATE_KEY);
+        if (netCode == this.netCode) SetKeyState(key, KEY_STATE_KEY);
     }
 }

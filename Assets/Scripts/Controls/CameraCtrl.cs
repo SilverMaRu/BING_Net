@@ -23,7 +23,17 @@ public class CameraCtrl : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        Client.ins.SpawnedLocalPlayerEvent += OnSpawnedLocalPlayer;
+    }
 
+    private void OnNetCodeChanged()
+    {
+        followTrans = Client.ins.GetLocalPlayerGO().transform;
+    }
+
+    private void OnSpawnedLocalPlayer()
+    {
+        followTrans = Client.ins.GetLocalPlayerGO().transform;
     }
 
     // Update is called once per frame

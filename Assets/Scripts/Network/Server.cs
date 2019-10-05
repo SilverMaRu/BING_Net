@@ -5,16 +5,20 @@ using UnityEngine.Networking;
 
 public class Server : MonoBehaviour
 {
+    public static Server ins { get; private set; }
     private const int EMPTY_HOST_ID = -1;
     private const int EMPTY_CONNECTION_ID = 0;
-    private const int EMPTY_PLAYER_NO = 0;
+    private const int EMPTY_NETCODE = -1;
     public bool isServer = true;
     public int serverPort = 8888;
     public int maxPlayerCount = 4;
-    public GameObject[] playerGOs;
-    private List<int> playerNoList = new List<int>();
+    private GameObject[] playerGOs { get { return GameControler.ins.playerGOs; } }
     private List<int> connIDList = new List<int>();
+    private List<int> netCodeList = new List<int>();
     private int currentConnCount = 0;
+    //同步位置评率
+    public float synchronizeFrequency = 0.2f;
+    private float lastSynchronizeTime = 0;
 
     private int hostID = EMPTY_HOST_ID;
     private int reliableChannelID = 0;
@@ -31,15 +35,21 @@ public class Server : MonoBehaviour
 
     private byte error = 0;
 
+    private void Awake()
+    {
+        ins = this;
+    }
+
     // Start is called before the first frame update
     void Start()
     {
         // 初始化分配玩家编号
         for (int i = 0; i < maxPlayerCount; i++)
         {
-            playerNoList.Add(i + 1);
+            netCodeList.Add(i);
             connIDList.Add(EMPTY_CONNECTION_ID);
         }
+        //playerGOs = Client.ins.playerGOs;
     }
 
     // Update is called once per frame
@@ -55,7 +65,7 @@ public class Server : MonoBehaviour
             {
                 isServer = false;
             }
-            if (isServer && Input.GetKeyDown(KeyCode.C))
+            if (Input.GetKeyDown(KeyCode.C))
             {
                 if (isServer)
                 {
@@ -79,32 +89,36 @@ public class Server : MonoBehaviour
             switch (eventType)
             {
                 case NetworkEventType.ConnectEvent:
-                    int portionPlayerNo = EMPTY_PLAYER_NO;
-                    if (TryPortionPlayerNo(recConnectionID, out portionPlayerNo))
+                    int netCode = EMPTY_NETCODE;
+                    if (TryPortionNetCode(recConnectionID, out netCode))
                     {
-                        sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "SetPlayerNo", portionPlayerNo);
+                        currentConnCount++;
+                        // 通知新玩家设置自己的编号
+                        sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "SetPlayerNo", netCode);
                         NetworkTransport.Send(hostID, recConnectionID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
-                        
-                        object[] datas = new object[maxPlayerCount * 2 + 1];
-                        datas[0] = "SynchronizePlayerPosition";
-                        for (int i = 1; i < datas.Length; i += 2)
+
+                        // 通知所有玩家设置各信息
+                        List<object> synPlayerInfoDataList = new List<object>();
+                        synPlayerInfoDataList.Add("SynchronizePlayerInfo");
+                        for (int i = 0; i < currentConnCount; i++)
                         {
-                            int j = (i - 1) / 2;
-                            datas[i] = j + 1;
-                            datas[i + 1] = playerGOs[j].transform.position;
+                            synPlayerInfoDataList.Add(netCodeList[i]);
                         }
-                        sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, datas);
-                        NetworkTransport.Send(hostID, recConnectionID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+                        sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, synPlayerInfoDataList.ToArray());
+                        SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+
+                        //// 通知所有玩家同步位置
+                        //SynchronizeAllPlayerTransform();
+                        Debug.Log("有新客户端连接,当前连接数 " + currentConnCount + "/" + maxPlayerCount);
                     }
-                    Debug.Log("有新客户端连接,当前连接数 " + currentConnCount + "/" + maxPlayerCount);
                     break;
                 case NetworkEventType.DataEvent:
                     Debug.Log("接收到客户端的新数据");
                     ExecuteInstruction(recConnectionID, NetworkCommunicateHelper.UnPack(recBuffer));
                     break;
                 case NetworkEventType.DisconnectEvent:
-                    int recyclePlayerNo = EMPTY_PLAYER_NO;
-                    TryRecyclePlayerNo(recConnectionID, out recyclePlayerNo);
+                    int recyclePlayerNo = EMPTY_NETCODE;
+                    TryRecycleNetCode(recConnectionID, out recyclePlayerNo);
                     Debug.Log("有客户端断开连接,当前连接数 " + currentConnCount + "/" + maxPlayerCount);
                     break;
                 case NetworkEventType.Nothing:
@@ -113,20 +127,34 @@ public class Server : MonoBehaviour
                 default:
                     break;
             }
+
+            //if (Time.time - lastSynchronizeTime > synchronizeFrequency)
+            //{
+            //    // 通知所有玩家同步位置
+            //    SynchronizeAllPlayerTransform();
+            //    lastSynchronizeTime = Time.time;
+            //}
         }
     }
 
-    public bool TryPortionPlayerNo(int connectionID, out int portionPlayerNo)
+    public bool HasVacancy()
+    {
+        bool hasVacancy = false;
+        hasVacancy = connIDList.Exists(t => t == EMPTY_CONNECTION_ID);
+        return hasVacancy;
+    }
+
+    public bool TryPortionNetCode(int connectionID, out int portionNetCode)
     {
         bool isSuccess = false;
-        portionPlayerNo = EMPTY_PLAYER_NO;
+        portionNetCode = EMPTY_NETCODE;
         for (int i = 0; i < maxPlayerCount; i++)
         {
             if (connIDList[i] <= EMPTY_CONNECTION_ID)
             {
-                portionPlayerNo = playerNoList[i];
+                portionNetCode = netCodeList[i];
                 connIDList[i] = connectionID;
-                currentConnCount++;
+                //currentConnCount++;
                 isSuccess = true;
                 break;
             }
@@ -134,17 +162,17 @@ public class Server : MonoBehaviour
         return isSuccess;
     }
 
-    public bool TryRecyclePlayerNo(int connectionID, out int recyclePlayerNo)
+    public bool TryRecycleNetCode(int connectionID, out int recycleNetCode)
     {
         bool isSuccess = false;
-        recyclePlayerNo = EMPTY_PLAYER_NO;
+        recycleNetCode = EMPTY_NETCODE;
         for (int i = 0; i < maxPlayerCount; i++)
         {
             if (connIDList[i] == connectionID)
             {
-                recyclePlayerNo = playerNoList[i];
+                recycleNetCode = netCodeList[i];
                 connIDList[i] = EMPTY_CONNECTION_ID;
-                currentConnCount--;
+                //currentConnCount--;
                 isSuccess = true;
                 break;
             }
@@ -152,13 +180,14 @@ public class Server : MonoBehaviour
         return isSuccess;
     }
 
-    public bool TryGetConnectionIDByPlayerNo(int playerNo, out int connectionID)
+    public bool TryGetConnectionIDByNetCode(int netCode, out int connectionID)
     {
         bool isSuccess = false;
         connectionID = EMPTY_CONNECTION_ID;
         for (int i = 0; i < maxPlayerCount; i++)
         {
-            if (playerNoList[i] == playerNo)
+            if (netCodeList[i] == netCode)
+            //if (playerInfoList[i].netCode == playerNo)
             {
                 connectionID = connIDList[i];
                 isSuccess = true;
@@ -168,15 +197,15 @@ public class Server : MonoBehaviour
         return isSuccess;
     }
 
-    public bool TryGetPlayerNoByConnectionID(int connectionID, out int playerNo)
+    public bool TryGetNetCodeByConnectionID(int connectionID, out int netCode)
     {
         bool isSuccess = false;
-        playerNo = EMPTY_PLAYER_NO;
+        netCode = EMPTY_NETCODE;
         for (int i = 0; i < maxPlayerCount; i++)
         {
             if (connIDList[i] == connectionID)
             {
-                playerNo = playerNoList[i];
+                netCode = netCodeList[i];
                 isSuccess = true;
                 break;
             }
@@ -184,7 +213,21 @@ public class Server : MonoBehaviour
         return isSuccess;
     }
 
-    private bool SendEveryPlayer(int hostId, int channelId, byte[] buffer, int size, out byte error)
+    // 通知所有玩家哪两位玩家进行身份调换
+    public void SwitchFaction(AttributesManager originalGhostAttrManager, AttributesManager originalPeopleAttrManager)
+    {
+        int originalGhostPlayerNo = EMPTY_NETCODE;
+        int originalPeoplePlayerNo = EMPTY_NETCODE;
+        if (Client.ins.TryGetNetCodeByPlayerGO(originalGhostAttrManager.gameObject, out originalGhostPlayerNo)
+            && Client.ins.TryGetNetCodeByPlayerGO(originalPeopleAttrManager.gameObject, out originalPeoplePlayerNo))
+        {
+            // 通知交换身份
+            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "SwitchFaction", originalGhostPlayerNo, originalPeoplePlayerNo);
+            SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+        }
+    }
+
+    private bool SendToEveryPlayer(int hostId, int channelId, byte[] buffer, int size, out byte error)
     {
         bool resultBool = true;
         error = 0;
@@ -194,7 +237,7 @@ public class Server : MonoBehaviour
             if (connectionID > EMPTY_CONNECTION_ID)
             {
                 resultBool &= NetworkTransport.Send(hostId, connectionID, channelId, buffer, size, out error);
-                if(!resultBool) break;
+                if (!resultBool) break;
             }
         }
         return resultBool;
@@ -207,6 +250,9 @@ public class Server : MonoBehaviour
             string methodName = (string)unPackDatas[0];
             switch (methodName)
             {
+                case "SynchronizePlayerInfoDone":
+                    SynchronizeAllPlayerTransform();
+                    break;
                 case "GetKeyDown":
                     CaseGetKeyDown(recConnectionID, unPackDatas);
                     break;
@@ -219,67 +265,89 @@ public class Server : MonoBehaviour
                 case "GetAxis":
                     CaseGetAxis(recConnectionID, unPackDatas);
                     break;
+                case "InputDirection":
+                    CaseInputDirection(recConnectionID, unPackDatas);
+                    break;
                 default:
                     break;
             }
         }
     }
 
-    private void CaseGetKeyDown(int recConnectionID, object[] datas)
+    private void SynchronizeAllPlayerTransform()
     {
-        int playerNo = EMPTY_PLAYER_NO;
-        if (TryGetPlayerNoByConnectionID(recConnectionID, out playerNo))
+        //Debug.Log("playerGOs.Length = " + playerGOs.Length);
+        List<object> synTransformDataList = new List<object>();
+        synTransformDataList.Add("SynchronizePlayerTransform");
+        for (int i = 0; i < currentConnCount; i++)
         {
-            //for (int i = 0; i < maxPlayerCount; i++)
-            //{
-            //    int connectionID = connIDList[i];
-            //    if (connectionID > EMPTY_CONNECTION_ID)
-            //    {
-            //        sendBufferSize = 0;
-            //        sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "GetKeyDown", playerNo, datas[1]);
-            //        NetworkTransport.Send(hostID, connectionID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
-            //    }
-            //}
+            int netCode = netCodeList[i];
+            synTransformDataList.Add(netCode);
+            GameObject playerGO = Client.ins.GetPlayerGOByNetCode(netCode);
+            synTransformDataList.Add(playerGO.transform.position);
+            synTransformDataList.Add(playerGO.transform.rotation);
+        }
+        sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, synTransformDataList.ToArray());
+        SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+    }
+
+    private void CaseGetKeyDown(int recConnectionID, object[] unPackDatas)
+    {
+        //SynchronizeAllPlayerTransform();
+        int playerNo = EMPTY_NETCODE;
+        if (TryGetNetCodeByConnectionID(recConnectionID, out playerNo))
+        {
             sendBufferSize = 0;
-            //sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "GetKeyDown", playerNo, datas[1]);
-            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(datas, 1, playerNo));
-            SendEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(unPackDatas, 1, playerNo));
+            SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
         }
     }
 
-    private void CaseGetKeyUp(int recConnectionID, object[] datas)
+    private void CaseGetKeyUp(int recConnectionID, object[] unPackDatas)
     {
-        int playerNo = EMPTY_PLAYER_NO;
-        if (TryGetPlayerNoByConnectionID(recConnectionID, out playerNo))
+        //SynchronizeAllPlayerTransform();
+        int playerNo = EMPTY_NETCODE;
+        if (TryGetNetCodeByConnectionID(recConnectionID, out playerNo))
         {
             sendBufferSize = 0;
-            //sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "GetKeyUp", playerNo, datas[1]);
-            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(datas, 1, playerNo));
-            SendEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(unPackDatas, 1, playerNo));
+            SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
         }
     }
 
-    private void CaseGetKey(int recConnectionID, object[] datas)
+    private void CaseGetKey(int recConnectionID, object[] unPackDatas)
     {
-        int playerNo = EMPTY_PLAYER_NO;
-        if (TryGetPlayerNoByConnectionID(recConnectionID, out playerNo))
+        //SynchronizeAllPlayerTransform();
+        int playerNo = EMPTY_NETCODE;
+        if (TryGetNetCodeByConnectionID(recConnectionID, out playerNo))
         {
             sendBufferSize = 0;
-            //sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "GetKey", playerNo, datas[1]);
-            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(datas, 1, playerNo));
-            SendEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(unPackDatas, 1, playerNo));
+            SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
         }
     }
 
-    private void CaseGetAxis(int recConnectionID, object[] datas)
+    private void CaseGetAxis(int recConnectionID, object[] unPackDatas)
     {
-        int playerNo = EMPTY_PLAYER_NO;
-        if (TryGetPlayerNoByConnectionID(recConnectionID, out playerNo))
+        int playerNo = EMPTY_NETCODE;
+        if (TryGetNetCodeByConnectionID(recConnectionID, out playerNo))
         {
             sendBufferSize = 0;
-            //sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "GetAxis", playerNo, datas[1]);
-            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(datas, 1, playerNo));
-            SendEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(unPackDatas, 1, playerNo));
+            SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
         }
+        //SynchronizeAllPlayerTransform();
+    }
+
+    private void CaseInputDirection(int recConnectionID, object[] unPackDatas)
+    {
+        int playerNo = EMPTY_NETCODE;
+        if (TryGetNetCodeByConnectionID(recConnectionID, out playerNo))
+        {
+            sendBufferSize = 0;
+            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, Tool.Insert(unPackDatas, 1, playerNo));
+            SendToEveryPlayer(hostID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+        }
+        //SynchronizeAllPlayerTransform();
     }
 }

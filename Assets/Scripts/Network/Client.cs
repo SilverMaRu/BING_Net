@@ -7,50 +7,65 @@ using System;
 public class Client : MonoBehaviour
 {
     public static Client ins { get; private set; }
-    public event Action PlayerNoChangedEvent;
+    public event Action NetCodeChangedEvent;
+    public event Action SpawnedLocalPlayerEvent;
     /// <summary>
-    /// arg1:playerNo
+    /// arg1 spawnPlayerNetCode
+    /// </summary>
+    public event Action<int> SpawnedPlayerEvent;
+    /// <summary>
+    /// arg1:NetCode
     /// arg2:axisName
     /// arg3:axisScale
     /// </summary>
     public event Action<int, string, float> NetInputAxisEvent;
     /// <summary>
-    /// arg1:playerNo
+    /// arg1:NetCode
+    /// arg2:inputDirection
+    /// </summary>
+    public event Action<int, Vector3> NetInputDirectionEvent;
+    /// <summary>
+    /// arg1:NetCode
     /// arg2:KeyCode
     /// </summary>
     public event Action<int, KeyCode> NetKeyDownEvent;
     /// <summary>
-    /// arg1:playerNo
+    /// arg1:NetCode
     /// arg2:KeyCode
     /// </summary>
     public event Action<int, KeyCode> NetKeyUpEvent;
     /// <summary>
-    /// arg1:playerNo
+    /// arg1:NetCode
     /// arg2:KeyCode
     /// </summary>
     public event Action<int, KeyCode> NetKeyEvent;
     private const int EMPTY_HOST_ID = -1;
     private const int EMPTY_CONNECTION_ID = -1;
     private Dictionary<string, float> axisLastScalePair = new Dictionary<string, float>();
+    private Vector3 lastInputDirection = Vector3.zero;
 
     public string serverIP = "127.0.0.1";
     public int serverPort = 8888;
-    private int _playerNo;
-    public int playerNo
+    private int _netCode = -1;
+    public int netCode
     {
         get
         {
-            return _playerNo;
+            return _netCode;
+            //return localPlayerInfo.netCode;
         }
-        set
+        private set
         {
-            _playerNo = value;
-            PlayerNoChangedEvent?.Invoke();
+            _netCode = value;
+            NetCodeChangedEvent?.Invoke();
         }
     }
 
-    public GameObject[] playerGOs;
+    //public GameObject[] playerGOs;
+    public GameObject[] playerGOs { get { return GameControler.ins.playerGOs; } }
 
+    // 标识是否等待连接服务器的新玩家
+    private bool waitingJoin = false;
     private int hostID = EMPTY_HOST_ID;
     private int connectionID = EMPTY_CONNECTION_ID;
     private int unreliableChannelID = 0;
@@ -92,6 +107,7 @@ public class Client : MonoBehaviour
                 hostID = NetworkTransport.AddHost(hostTopology);
                 connectionID = NetworkTransport.Connect(hostID, serverIP, serverPort, 0, out error);
                 recBuffer = new byte[recBufferSize];
+                waitingJoin = true;
             }
         }
         else
@@ -118,6 +134,7 @@ public class Client : MonoBehaviour
 
             SendAxis("H");
             SendAxis("V");
+            SendInputDirection();
             SendKey(KeyCode.Mouse0);
             SendKey(KeyCode.Mouse1);
             SendKey(KeyCode.LeftShift);
@@ -126,10 +143,43 @@ public class Client : MonoBehaviour
         }
     }
 
+    public bool TryGetNetCodeByPlayerGO(GameObject playerGO, out int netCode)
+    {
+        bool isHas = false;
+        //playerNo = 0;
+        netCode = -1;
+        for (int i = 0; i < playerGOs.Length; i++)
+        {
+            if (playerGOs[i].Equals(playerGO))
+            {
+                isHas = true;
+                //playerNo = i + 1;
+                netCode = i;
+                break;
+            }
+        }
+        return isHas;
+    }
+
+    public GameObject GetPlayerGOByNetCode(int netCode)
+    {
+        return PlayerState.GetPlayerStateByNetCode(netCode)?.gameObject;
+    }
+
+    public bool IsLocalPlayer(int netCode)
+    {
+        return netCode == this.netCode;
+    }
+
+    public GameObject GetLocalPlayerGO()
+    {
+        return GetPlayerGOByNetCode(netCode);
+    }
+
     private void SendAxis(string axisName)
     {
         float axisScale = Input.GetAxis(axisName);
-        Debug.Log("axisName = " + axisName + ";axisScale = " + axisScale);
+        //Debug.Log("axisName = " + axisName + ";axisScale = " + axisScale);
         float axisLastScale = 0;
         bool tryGetSuccess = axisLastScalePair.TryGetValue(axisName, out axisLastScale);
 
@@ -169,6 +219,19 @@ public class Client : MonoBehaviour
         }
     }
 
+    private void SendInputDirection()
+    {
+        Vector3 inputDirection = (Input.GetAxis("V") * CameraCtrl.rigTrans.forward + Input.GetAxis("H") * CameraCtrl.cameraTrans.right);
+        if (lastInputDirection != inputDirection)
+        {
+            sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "InputDirection", inputDirection);
+            NetworkTransport.Send(hostID, connectionID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+            lastInputDirection = inputDirection;
+        }
+        //sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "InputDirection", inputDirection);
+        //NetworkTransport.Send(hostID, connectionID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
+    }
+
     private void ExecuteInstruction(object[] unPackDatas)
     {
         if (unPackDatas != null && unPackDatas.Length > 0)
@@ -178,6 +241,9 @@ public class Client : MonoBehaviour
             {
                 case "SetPlayerNo":
                     CaseSetPlayerNo(unPackDatas);
+                    break;
+                case "SynchronizePlayerInfo":
+                    CaseSynchronizePlayerInfo(unPackDatas);
                     break;
                 case "GetKeyDown":
                     CaseGetKeyDown(unPackDatas);
@@ -191,8 +257,14 @@ public class Client : MonoBehaviour
                 case "GetAxis":
                     CaseGetAxis(unPackDatas);
                     break;
-                case "SynchronizePlayerPosition":
-                    CaseSynchronizePlayerPosition(unPackDatas);
+                case "InputDirection":
+                    CaseInputDirection(unPackDatas);
+                    break;
+                case "SynchronizePlayerTransform":
+                    CaseSynchronizePlayerTransform(unPackDatas);
+                    break;
+                case "SwitchFaction":
+                    CaseSwitchFaction(unPackDatas);
                     break;
                 default:
                     break;
@@ -202,31 +274,27 @@ public class Client : MonoBehaviour
 
     private void CaseSetPlayerNo(object[] unPackDatas)
     {
-        playerNo = (int)unPackDatas[1];
+        netCode = (int)unPackDatas[1];
+        GameControler.ins.SpawnPlayer(netCode, netCode.ToString());
+        SpawnedLocalPlayerEvent?.Invoke();
+    }
+
+    private void CaseSynchronizePlayerInfo(object[] unPackDatas)
+    {
+        for (int i = 1; i < unPackDatas.Length; i++)
+        {
+            int netCode = (int)unPackDatas[i];
+            if (GetPlayerGOByNetCode(netCode) == null)
+                GameControler.ins.SpawnPlayer(netCode, netCode.ToString());
+        }
+        sendBuffer = NetworkCommunicateHelper.ToPack(out sendBufferSize, "SynchronizePlayerInfoDone");
+        NetworkTransport.Send(hostID, connectionID, unreliableChannelID, sendBuffer, sendBufferSize, out error);
     }
 
     private void CaseGetKeyDown(object[] unPackDatas)
     {
         int playerNo = (int)unPackDatas[1];
         string keyCodeName = (string)unPackDatas[2];
-        //Transform playerGOTrans = playerGOs[playerNo - 1].transform;
-        //switch (keyCodeName)
-        //{
-        //    case "W":
-        //        playerGOTrans.position += playerGOTrans.forward * 5 * Time.deltaTime;
-        //        break;
-        //    case "A":
-        //        playerGOTrans.position -= playerGOTrans.right * 5 * Time.deltaTime;
-        //        break;
-        //    case "S":
-        //        playerGOTrans.position -= playerGOTrans.forward * 5 * Time.deltaTime;
-        //        break;
-        //    case "D":
-        //        playerGOTrans.position += playerGOTrans.right * 5 * Time.deltaTime;
-        //        break;
-        //    default:
-        //        break;
-        //}
         NetKeyDownEvent?.Invoke(playerNo, (KeyCode)Enum.Parse(typeof(KeyCode), keyCodeName));
     }
 
@@ -252,13 +320,30 @@ public class Client : MonoBehaviour
         NetInputAxisEvent?.Invoke(playerNo, axisName, axisScale);
     }
 
-    private void CaseSynchronizePlayerPosition(object[] unPackDatas)
+    private void CaseInputDirection(object[] unPackDatas)
     {
-        for (int i = 1; i < unPackDatas.Length; i += 2)
+        int playerNo = (int)unPackDatas[1];
+        Vector3 inputDirection = (Vector3)unPackDatas[2];
+        NetInputDirectionEvent?.Invoke(playerNo, inputDirection);
+    }
+
+    private void CaseSynchronizePlayerTransform(object[] unPackDatas)
+    {
+        for (int i = 1; i < unPackDatas.Length; i += 3)
         {
-            int playerNo = (int)unPackDatas[i];
-            Vector3 position = (Vector3)unPackDatas[i + 1];
-            playerGOs[playerNo - 1].transform.position = position;
+            int netCode = (int)unPackDatas[i];
+            Transform transform = GetPlayerGOByNetCode(netCode).transform;
+            transform.position = (Vector3)unPackDatas[i + 1];
+            transform.rotation = (Quaternion)unPackDatas[i + 2];
         }
+    }
+
+    private void CaseSwitchFaction(object[] unPackDatas)
+    {
+        int originalGhostPlayerNo = (int)unPackDatas[1];
+        int originalPeoplePlayerNo = (int)unPackDatas[2];
+        AttributesManager originalGhostAttr = GetPlayerGOByNetCode(originalGhostPlayerNo).GetComponent<AttributesManager>();
+        AttributesManager originalPeopleAttr = GetPlayerGOByNetCode(originalPeoplePlayerNo).GetComponent<AttributesManager>();
+        GameControler.ins.SwitchFaction(originalGhostAttr, originalPeopleAttr);
     }
 }

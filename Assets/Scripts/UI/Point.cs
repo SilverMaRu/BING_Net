@@ -8,17 +8,23 @@ public class Point : MonoBehaviour
     public GameObject bindPlayer;
     public Text pointValueText;
 
+    private PlayerState bindPlayerState;
+
     // Start is called before the first frame update
     void Start()
     {
-        GameControler.ins.PlayerPointChangedEvent += OnPlayerPointChanged;
+        Client.ins.SpawnedLocalPlayerEvent += OnSpawnedLocalPlayer;
     }
 
-    private void OnPlayerPointChanged(GameObject getPointPlayer, int currentPoint)
+    private void OnSpawnedLocalPlayer()
     {
-        if (getPointPlayer.Equals(bindPlayer))
-        {
-            pointValueText.text = currentPoint.ToString();
-        }
+        bindPlayer = Client.ins.GetLocalPlayerGO();
+        bindPlayerState = bindPlayer.GetComponent<PlayerState>();
+        bindPlayerState.PlayerScoreChangedEvent += OnPlayerScoreChanged;
+    }
+
+    private void OnPlayerScoreChanged(int netCode, string name, int currentValue)
+    {
+        pointValueText.text = currentValue.ToString();
     }
 }

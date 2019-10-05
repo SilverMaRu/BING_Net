@@ -9,9 +9,10 @@ public class ActivityTurn : ActivityBase
         get
         {
             //Vector3 result = Input.GetAxis("V") * CameraCtrl.rigTrans.forward + Input.GetAxis("H") * CameraCtrl.cameraTrans.right;
-            Vector3 result = networkInput.GetAxis("V") * CameraCtrl.rigTrans.forward + networkInput.GetAxis("H") * CameraCtrl.cameraTrans.right;
-            result.Normalize();
-            return result;
+            //Vector3 result = networkInput.GetAxis("V") * CameraCtrl.rigTrans.forward + networkInput.GetAxis("H") * CameraCtrl.cameraTrans.right;
+            //result.Normalize();
+            //return result;
+            return networkInput.inputDirection.normalized;
         }
     }
     private Coroutine smoothStop;

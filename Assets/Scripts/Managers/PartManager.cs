@@ -33,11 +33,8 @@ public class PartManager : MonoBehaviour
         foreach (Part tempPart in managedParts)
         {
             tempPart.partManager = this;
-            //tempPart.SetEnable(attrManager.faction);
             tempPart.TouchEvent += OnTouch;
         }
-        
-        //attrManager.PlayerFactionChangeEvent += OnPlayerFactionChange;
     }
 
     public void AddOnTouchAction(TouchDelegate OnTouchAction)
@@ -58,26 +55,22 @@ public class PartManager : MonoBehaviour
 
     private void OnTouch(Part sender, TouchEventData eventDate)
     {
-        PlayerFaction onwerFaction = attrManager.faction;
-        Part otherPart = eventDate.otherPart;
-        PartType otherPartType = otherPart.partType;
-        if (onwerFaction == PlayerFaction.Ghost && otherPartType == PartType.Body && !otherPart.partManager.IsOwnerBinging)
+        // 如果是服务器则正常做处理
+        if (Server.ins.enabled)
         {
-            //GameControler.ins.SwitchFaction(gameObject, otherPart.partManager.gameObject);
-            GameControler.ins.SwitchFaction(attrManager, otherPart.partManager.attrManager);
-        }
-        else if (onwerFaction == PlayerFaction.People && !IsOwnerBinging && otherPartType == PartType.RightHand)
-        {
-            //GameControler.ins.SwitchFaction(otherPart.partManager.gameObject, gameObject);
-            GameControler.ins.SwitchFaction(otherPart.partManager.attrManager, attrManager);
+            PlayerFaction onwerFaction = attrManager.faction;
+            Part otherPart = eventDate.otherPart;
+            PartType otherPartType = otherPart.partType;
+            if (onwerFaction == PlayerFaction.Ghost && otherPartType == PartType.Body && !otherPart.partManager.IsOwnerBinging)
+            {
+                //GameControler.ins.SwitchFaction(attrManager, otherPart.partManager.attrManager);
+                Server.ins.SwitchFaction(attrManager, otherPart.partManager.attrManager);
+            }
+            else if (onwerFaction == PlayerFaction.People && !IsOwnerBinging && otherPartType == PartType.RightHand)
+            {
+                //GameControler.ins.SwitchFaction(otherPart.partManager.attrManager, attrManager);
+                Server.ins.SwitchFaction(otherPart.partManager.attrManager, attrManager);
+            }
         }
     }
-
-    //private void OnPlayerFactionChange(PlayerFaction currentFaction)
-    //{
-    //    foreach (Part tempPart in managedParts)
-    //    {
-    //        tempPart.SetEnable(currentFaction);
-    //    }
-    //}
 }
